@@ -1,11 +1,28 @@
 // news-image-20261118 entry (Node 22, standard library only): the image is the
 // entry.png beside this file, and the program copies it to /output/entry.png.
-// No network; both runs write the same bytes.
+// After copying, it reads the output back and verifies the PNG signature,
+// dimensions (1024x1024) and size (<=1 MiB), then prints a confirmation line
+// with the output sha256. No network; both runs write the same bytes.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-copyFileSync(new URL('./entry.png', import.meta.url), join(process.env.MAKEFUN_OUTPUT_DIR ?? '/output', 'entry.png'));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const outPath = join(outDir, 'entry.png');
+copyFileSync(new URL('./entry.png', import.meta.url), outPath);
+
+const buf = readFileSync(outPath);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+if (!buf.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('output is not a PNG');
+if (buf.length < 33 || buf.toString('ascii', 12, 16) !== 'IHDR') throw new Error('output has no IHDR chunk');
+const width = buf.readUInt32BE(16);
+const height = buf.readUInt32BE(20);
+if (width !== 1024 || height !== 1024) throw new Error(`unexpected dimensions ${width}x${height}, expected 1024x1024`);
+const size = statSync(outPath).size;
+if (size > 1024 * 1024) throw new Error(`output ${size} bytes exceeds 1 MiB`);
+const sha256 = createHash('sha256').update(buf).digest('hex');
+console.log(`verified ${outPath}: PNG ${width}x${height}, ${size} bytes, sha256 ${sha256}`);
